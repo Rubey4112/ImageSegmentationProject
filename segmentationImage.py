@@ -4,11 +4,12 @@ from ultralytics import YOLO
 model = YOLO("yolov8m-seg.pt")
 # model = FastSAM("FastSAM-s.pt")
 
-video = "SegmentationTestVid.mov"
-results = model(video, stream = True, show = True)
+video = "testImage.jpg"
+results = model(video, show = True)
 
 for r in results:
     print(r.masks)  # print the Masks object containing the detected instance masks
+    print("#####################################")
 # cap = cv2.VideoCapture(video)
 
 # while cap.isOpened():
