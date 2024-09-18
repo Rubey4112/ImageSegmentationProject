@@ -37,9 +37,9 @@ while cap.isOpened():
         isolated = cv2.bitwise_and(mask, frame)
         cv2.imshow("YOLOv8 Inference", isolated)
 
-        # end = time.perf_counter()
-        # total_time = end - start
-        # fps = 1 / total_time
+        # end = time.pernd - start
+        # fps = 1 / totf_counter()
+        # total_time = eal_time
 
         # annotated_frame = results[0].plot()
 

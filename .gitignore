@@ -1,14 +1,4 @@
 /.venv
-/best.pt
-/FastSAM-s.pt
-/runs
-/sam2_b.pt
-/sam2_t.pt
-/SegmentationTestVid.mov
-/v8_n.pt
-/yolov8m-pose.pt
-/yolov8m-seg.pt
-/yolov8n-seg.pt
-/yolov8n.pt
-/yolov8x-seg.pt
-merged_segs.jpg
+*.pt
+*.jpg
+*.mov
