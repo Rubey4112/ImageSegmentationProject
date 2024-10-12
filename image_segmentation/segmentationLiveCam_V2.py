@@ -2,13 +2,25 @@ import cv2, time
 from ultralytics import YOLO
 import numpy as np
 import torch
-from PIL import Image
+import NDIlib as ndi
+import sys
 
-model = YOLO("yolov8m-seg.pt")
+model = YOLO("yolo11m-seg.pt")
 # model = FastSAM("FastSAM-s.pt")
 
 video = "SegmentationTestVid.mov"
-cap = cv2.VideoCapture(0)
+cap = cv2.VideoCapture(cv2.CAP_DSHOW)
+
+if not ndi.initialize():
+    sys.exit(1)
+
+send_settings = ndi.SendCreate()
+send_settings.ndi_name = 'ndi-python'
+
+ndi_send = ndi.send_create(send_settings)
+
+video_frame = ndi.VideoFrameV2()
+
 
 while cap.isOpened():
 
@@ -16,7 +28,7 @@ while cap.isOpened():
 
     if success:
         start = time.perf_counter()
-        results = model.predict(frame)
+        results = model(frame)
         # for result in results:
         result = results[0]
         # get array results
@@ -35,6 +47,11 @@ while cap.isOpened():
         # color_converted = cv2.cvtColor(people_mask.cpu().numpy().astype(np.uint8), cv2.COLOR_BGR2RGB)
         mask = cv2.cvtColor(people_mask.cpu().numpy().astype(np.uint8), cv2.COLOR_GRAY2BGR)
         isolated = cv2.bitwise_and(mask, frame)
+        img = cv2.cvtColor(isolated, cv2.COLOR_BGR2BGRA)
+        video_frame.data = img
+        video_frame.FourCC = ndi.FOURCC_VIDEO_TYPE_BGRX
+
+        ndi.send_send_video_v2(ndi_send, video_frame)
         cv2.imshow("YOLOv8 Inference", isolated)
 
         # end = time.pernd - start
@@ -47,8 +64,14 @@ while cap.isOpened():
         # cv2.imshow("YOLOv8 Inference", annotated_frame)
 
         if cv2.waitKey(1) & 0xFF == ord("q"):
+            ndi.send_destroy(ndi_send)
+
+            ndi.destroy()
             break
     else:
+        ndi.send_destroy(ndi_send)
+
+        ndi.destroy()
         break
 
 cap.release()
