@@ -8,7 +8,7 @@ import sys
 model = YOLO("yolo11m-seg.pt")
 # model = FastSAM("FastSAM-s.pt")
 
-cap = cv2.VideoCapture(cv2.CAP_DSHOW)
+cap = cv2.VideoCapture(2)
 
 if not ndi.initialize():
     sys.exit(1)
