@@ -40,22 +40,19 @@ class Thread(QThread):
         ####### End of Class Field ########
         
 
-        #### NDI ####
-        if not ndi.initialize():
-            sys.exit(1)
-
         #### NDI RECV ####
         self.ndi_find = ndi.find_create_v2()
 
         if self.ndi_find is None:
             sys.exit(1)
 
-        self.sources = []
-        while not len(self.sources) > 0:
-            print('Looking for sources ...')
-            ndi.find_wait_for_sources(self.ndi_find, 1000)
-            self.sources = ndi.find_get_current_sources(self.ndi_find)
-        print([s.ndi_name for s in self.sources])
+        # self.sources = []
+
+        # print('Looking for sources ...')
+        # while not len(self.sources) > 0:
+        #     print(ndi.find_wait_for_sources(self.ndi_find, 1000))
+        #     self.sources = ndi.find_get_current_sources(self.ndi_find)
+        # print([s.ndi_name for s in self.sources])
 
         self.ndi_recv_create = ndi.RecvCreateV3()
         self.ndi_recv_create.color_format = ndi.RECV_COLOR_FORMAT_BGRX_BGRA
@@ -65,7 +62,6 @@ class Thread(QThread):
         if self.ndi_recv is None:
             sys.exit(1)
 
-        ndi.recv_connect(self.ndi_recv, self.sources[0])
         ndi.find_destroy(self.ndi_find)
 
 
@@ -77,12 +73,17 @@ class Thread(QThread):
         self.video_frame = ndi.VideoFrameV2()
 
         self.ndi_recv_buffer = []
-        self.nframe = np.zeros((self.res_x, self.res_y, 3),dtype=np.uint8)
+        self.nframe = np.zeros((self.res_y, self.res_x, 3),dtype=np.uint8)
 
     def set_camera_res():
         pass
-
+    @Slot()
+    def stop(self):
+        self.status = False
+        
+    @Slot()
     def run(self):
+        self.status = True
         self.cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.res_x)
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.res_y)
@@ -98,41 +99,40 @@ class Thread(QThread):
                 # cv2.imshow('ndi image', ndi_frame)
                 ndi.recv_free_video_v2(self.ndi_recv, v)
             if success:
-                start = time.perf_counter()
-                results = self.model(frame)
+                # start = time.perf_counter()
+                results = self.model.predict(frame, verbose = False)
                 # for result in results:
                 result = results[0]
-                if result == None: continue
-                # get array results
-                masks = result.masks.data
-                boxes = result.boxes.data
-                # extract classes
-                clss = boxes[:, 5]
-                # get indices of results where class is 0 (people in COCO)
-                people_indices = torch.where(clss == 0)
-                # use these indices to extract the relevant masks
-                people_masks = masks[people_indices]
-                # scale for visualizing results
-                people_mask = torch.any(people_masks, dim=0).int() * 255
-                # save to filef
-                # cv2.imwrite('./merged_segs.jpg', people_mask.cpu().numpy())
-                # color_converted = cv2.cvtColor(people_mask.cpu().numpy().astype(np.uint8), cv2.COLOR_BGR2RGB)
-                
-                
-                
-                mask = cv2.cvtColor(people_mask.cpu().numpy().astype(np.uint8), cv2.COLOR_GRAY2BGR)
-                if len(self.ndi_recv_buffer):
-                    self.nframe = self.ndi_recv_buffer.pop()     
-                # print(nframe)  
-                if not mask.size:
-                    isolated = cv2.bitwise_and(mask, self.nframe)
-                else: isolated = self.nframe
+                if result.masks != None:
+                    # get array results
+                    masks = result.masks.data
+                    boxes = result.boxes.data
+                    # extract classes
+                    clss = boxes[:, 5]
+                    # get indices of results where class is 0 (people in COCO)
+                    people_indices = torch.where(clss == 0)
+                    # use these indices to extract the relevant masks
+                    people_masks = masks[people_indices]
+                    # scale for visualizing results
+                    people_mask = torch.any(people_masks, dim=0).int() * 255
+                    # save to filef
+                    # cv2.imwrite('./merged_segs.jpg', people_mask.cpu().numpy())
+                    # color_converted = cv2.cvtColor(people_mask.cpu().numpy().astype(np.uint8), cv2.COLOR_BGR2RGB)
+                    
+                    
+                    mask = cv2.cvtColor(people_mask.cpu().numpy().astype(np.uint8), cv2.COLOR_GRAY2BGR)
+                    if len(self.ndi_recv_buffer):
+                        self.nframe = self.ndi_recv_buffer.pop()     
+                    # print(nframe)  
+                    if mask.size:
+                        isolated = cv2.bitwise_and(mask, self.nframe)
+                else: 
+                    isolated = self.nframe
                 img = cv2.cvtColor(isolated, cv2.COLOR_BGR2BGRA)
                 self.video_frame.data = img
                 self.video_frame.FourCC = ndi.FOURCC_VIDEO_TYPE_BGRX
 
                 ndi.send_send_video_v2(self.ndi_send, self.video_frame)          
-            
             
             # Reading the image in RGB to display it
             if self.enable_preview:
@@ -144,7 +144,12 @@ class Thread(QThread):
 
                 # Emit signal
                 self.updateFrame.emit(scaled_img)
-        sys.exit(-1)
+        # sys .exit(-1)
+    @Slot()
+    def set_ndi_source(self, ndi_source):
+        ndi.recv_connect(self.ndi_recv, ndi_source)
+        # print("wow this actually work")
+
 
 
 class Window(QMainWindow):
@@ -164,6 +169,8 @@ class Window(QMainWindow):
         about = QAction("About Qt", self, shortcut=QKeySequence(QKeySequence.HelpContents),
                         triggered=qApp.aboutQt)  # noqa: F821
         self.menu_about.addAction(about)
+        
+        # self.menu_setting =
 
         # Create a label for the display camera
         self.label = QLabel(self)
@@ -175,30 +182,44 @@ class Window(QMainWindow):
         self.th.updateFrame.connect(self.setImage)
 
         # Model group
-        # self.group_model = QGroupBox("Trained model")
-        # self.group_model.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
-        # model_layout = QHBoxLayout()
+        self.group_model = QGroupBox("NDI Source")
+        self.group_model.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
+        model_layout = QHBoxLayout()
 
-        # self.combobox = QComboBox()
-        # for xml_file in os.listdir(cv2.data.haarcascades):
-        #     if xml_file.endswith(".xml"):
-        #         self.combobox.addItem(xml_file)
+        if not ndi.initialize():
+            sys.exit(1)
 
-        # model_layout.addWidget(QLabel("File:"), 10)
-        # model_layout.addWidget(self.combobox, 90)
-        # self.group_model.setLayout(model_layout)
+        #### NDI RECV ####
+        self.ndi_find = ndi.find_create_v2()
 
+        if self.ndi_find is None:
+            sys.exit(1)
+
+        self.sources = []
+
+        self.combobox = QComboBox()
+        # for source in self.sources:
+        #     self.combobox.addItem(source.ndi_name)
+
+        self.refresh_button = QPushButton("R")
+
+        model_layout.addWidget(QLabel("Source:"), 10)
+        model_layout.addWidget(self.combobox, 90)
+        model_layout.addWidget(self.refresh_button)
+        self.group_model.setLayout(model_layout)
+        
+        
         # Buttons layout
         buttons_layout = QHBoxLayout()
         self.button1 = QPushButton("Start")
         self.button2 = QPushButton("Stop/Close")
-        self.button1.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
-        self.button2.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
+        self.button1.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        self.button2.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         buttons_layout.addWidget(self.button2)
         buttons_layout.addWidget(self.button1)
 
         right_layout = QHBoxLayout()
-        # right_layout.addWidget(self.group_model, 1)
+        right_layout.addWidget(self.group_model, 1)
         right_layout.addLayout(buttons_layout, 1)
 
         # Main layout
@@ -215,11 +236,23 @@ class Window(QMainWindow):
         self.button1.clicked.connect(self.start)
         self.button2.clicked.connect(self.kill_thread)
         self.button2.setEnabled(False)
+        self.refresh_button.clicked.connect(self.refresh_sources)
         # self.combobox.currentTextChanged.connect(self.set_model)
+        self.combobox.currentIndexChanged.connect(self.set_ndi_source)
 
     @Slot()
-    def set_model(self, text):
-        self.th.set_file(text)
+    def set_ndi_source(self, source_id):
+        self.th.set_ndi_source(self.sources[source_id])
+    
+    def refresh_sources(self):
+        if not ndi.find_wait_for_sources(self.ndi_find, 1000):
+            print("no change in source")
+        else:
+            self.sources = ndi.find_get_current_sources(self.ndi_find)
+            self.combobox.clear()
+            for source in self.sources:
+                self.combobox.addItem(source.ndi_name)
+
 
     @Slot()
     def kill_thread(self):
@@ -228,7 +261,7 @@ class Window(QMainWindow):
         self.button1.setEnabled(True)
         self.th.cap.release()
         cv2.destroyAllWindows()
-        self.th.status = False
+        self.th.stop()
         time.sleep(1)
         self.th.quit()
         # Give time for the thread to finish
@@ -237,10 +270,11 @@ class Window(QMainWindow):
     @Slot()
     def start(self):
         print("Starting...")
+        # if()
         self.button2.setEnabled(True)
         self.button1.setEnabled(False)
         # self.th.set_file(self.combobox.currentText())
-        self.th.status = True
+        # self.th.status = True
         self.th.start()
 
     @Slot(QImage)

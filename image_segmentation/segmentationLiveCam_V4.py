@@ -7,8 +7,12 @@ import sys
 
 model = YOLO("yolo11m-seg.pt")
 
-cap = cv2.VideoCapture(cv2.CAP_DSHOW)
+cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
 
+width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+print("Camera resolution:", width, "x", height)
 
 #### NDI ####
 if not ndi.initialize():
@@ -67,6 +71,7 @@ while cap.isOpened():
         results = model(frame)
         # for result in results:
         result = results[0]
+        # print(result)
         # get array results
         masks = result.masks.data
         boxes = result.boxes.data
