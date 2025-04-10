@@ -84,7 +84,7 @@ class Thread(QThread):
     @Slot()
     def run(self):
         self.status = True
-        self.cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+        self.cap = cv2.VideoCapture(1, cv2.CAP_DSHOW)
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.res_x)
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.res_y)
         while self.status:
