@@ -15,7 +15,7 @@ from PySide6.QtCore import Qt, QThread, Signal, Slot
 from PySide6.QtGui import QAction, QImage, QKeySequence, QPixmap
 from PySide6.QtWidgets import (QApplication, QComboBox, QGroupBox,
                                QHBoxLayout, QLabel, QMainWindow, QPushButton,
-                               QSizePolicy, QVBoxLayout, QWidget)
+                               QSizePolicy, QVBoxLayout, QWidget, QCheckBox)
 
 
 """This example uses the video from a  webcam to apply pattern
@@ -29,14 +29,15 @@ class Thread(QThread):
         QThread.__init__(self, parent)
 
         ########## Class Field ###########
-        self.enable_preview = True
         self.trained_file = None
         self.status = True
         self.cap = True
+        self.camera_preview = False
         self.model = YOLO("yolo11m-seg.pt")
 
         self.res_x = 640
         self.res_y = 480
+        
         ####### End of Class Field ########
         
 
@@ -67,13 +68,14 @@ class Thread(QThread):
 
         #### NDI SEND ####
         self.send_settings = ndi.SendCreate()
-        self.send_settings.ndi_name = 'ndi-python'
+        self.send_settings.ndi_name = 'dyna-projection'
 
         self.ndi_send = ndi.send_create(self.send_settings)
         self.video_frame = ndi.VideoFrameV2()
 
         self.ndi_recv_buffer = []
         self.nframe = np.zeros((self.res_y, self.res_x, 3),dtype=np.uint8)
+        self.blank_frame = np.zeros((self.res_y, self.res_x, 3),dtype=np.uint8)
 
     def set_camera_res():
         pass
@@ -83,51 +85,55 @@ class Thread(QThread):
         
     @Slot()
     def run(self):
-        self.status = True
-        self.cap = cv2.VideoCapture(1, cv2.CAP_DSHOW)
+        self.status = True # thread state
+        self.cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.res_x)
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.res_y)
+
+        isolated = self.blank_frame
+
         while self.status:
             success, frame = self.cap.read()
             t, v, _, _ = ndi.recv_capture_v2(self.ndi_recv, 5000)
 
             if t == ndi.FRAME_TYPE_VIDEO:
-                # print('Video data received (%dx%d).' % (v.xres, v.yres))
                 self.ndi_frame = np.copy(v.data)
                 self.ndi_frame = cv2.resize(self.ndi_frame, (self.res_x, self.res_y))[:,:,:3]
                 self.ndi_recv_buffer.append(self.ndi_frame)
-                # cv2.imshow('ndi image', ndi_frame)
                 ndi.recv_free_video_v2(self.ndi_recv, v)
             if success:
                 # start = time.perf_counter()
                 results = self.model.predict(frame, verbose = False)
                 # for result in results:
                 result = results[0]
-                if result.masks != None:
-                    # get array results
-                    masks = result.masks.data
-                    boxes = result.boxes.data
-                    # extract classes
-                    clss = boxes[:, 5]
-                    # get indices of results where class is 0 (people in COCO)
-                    people_indices = torch.where(clss == 0)
-                    # use these indices to extract the relevant masks
-                    people_masks = masks[people_indices]
-                    # scale for visualizing results
-                    people_mask = torch.any(people_masks, dim=0).int() * 255
-                    # save to filef
-                    # cv2.imwrite('./merged_segs.jpg', people_mask.cpu().numpy())
-                    # color_converted = cv2.cvtColor(people_mask.cpu().numpy().astype(np.uint8), cv2.COLOR_BGR2RGB)
-                    
-                    
-                    mask = cv2.cvtColor(people_mask.cpu().numpy().astype(np.uint8), cv2.COLOR_GRAY2BGR)
-                    if len(self.ndi_recv_buffer):
-                        self.nframe = self.ndi_recv_buffer.pop()     
-                    # print(nframe)  
-                    if mask.size:
-                        isolated = cv2.bitwise_and(mask, self.nframe)
-                else: 
-                    isolated = self.nframe
+
+                if len(self.ndi_recv_buffer):
+                    self.nframe = self.ndi_recv_buffer.pop() 
+
+                if not self.camera_preview:
+                    if result.masks is not None:
+                        # get array results
+                        masks = result.masks.data
+                        boxes = result.boxes.data
+                        # extract classes
+                        clss = boxes[:, 5]
+                        # get indices of results where class is 0 (people in COCO)
+                        people_indices = torch.where(clss == 0)
+                        # use these indices to extract the relevant masks
+                        people_masks = masks[people_indices]
+                        # scale for visualizing results
+                        people_mask = torch.any(people_masks, dim=0).int() * 255
+                        
+                        mask = cv2.cvtColor(people_mask.cpu().numpy().astype(np.uint8), cv2.COLOR_GRAY2BGR)
+                        
+                        if mask.size:
+                            isolated = cv2.bitwise_and(mask, self.nframe)
+                    elif counter>3: 
+                        counter = 0
+                        isolated = self.blank_frame
+                    else: counter+=1
+                else:
+                    isolated = frame
                 img = cv2.cvtColor(isolated, cv2.COLOR_BGR2BGRA)
                 self.video_frame.data = img
                 self.video_frame.FourCC = ndi.FOURCC_VIDEO_TYPE_BGRX
@@ -145,6 +151,15 @@ class Thread(QThread):
                 # Emit signal
                 self.updateFrame.emit(scaled_img)
         # sys .exit(-1)
+
+    @Slot()
+    def enable_preview(self):
+        self.camera_preview = True
+
+    @Slot()
+    def disable_preview(self):
+        self.camera_preview = False
+    
     @Slot()
     def set_ndi_source(self, ndi_source):
         ndi.recv_connect(self.ndi_recv, ndi_source)
@@ -156,7 +171,7 @@ class Window(QMainWindow):
     def __init__(self):
         super().__init__()
         # Title and dimensions
-        self.setWindowTitle("Patterns detection")
+        self.setWindowTitle("Dynamic Projection")
         self.setGeometry(0, 0, 800, 500)
 
         # Main menu bar
@@ -218,9 +233,17 @@ class Window(QMainWindow):
         buttons_layout.addWidget(self.button2)
         buttons_layout.addWidget(self.button1)
 
+        # Checkbox
+        self.checkbox = QCheckBox("Enable preview", self)
+        buttons_layout.addWidget(self.checkbox)
+
+
+        # Buttons group
         right_layout = QHBoxLayout()
         right_layout.addWidget(self.group_model, 1)
         right_layout.addLayout(buttons_layout, 1)
+
+        
 
         # Main layout
         layout = QVBoxLayout()
@@ -231,15 +254,24 @@ class Window(QMainWindow):
         widget = QWidget(self)
         widget.setLayout(layout)
         self.setCentralWidget(widget)
-
+        
+        
+        
         # Connections
+        self.checkbox.clicked.connect(self.checkbox_clicked)
         self.button1.clicked.connect(self.start)
         self.button2.clicked.connect(self.kill_thread)
         self.button2.setEnabled(False)
         self.refresh_button.clicked.connect(self.refresh_sources)
-        # self.combobox.currentTextChanged.connect(self.set_model)
         self.combobox.currentIndexChanged.connect(self.set_ndi_source)
 
+    @Slot()
+    def checkbox_clicked(self, checked):
+        if checked:
+            self.th.enable_preview()
+        else:
+            self.th.disable_preview()
+    
     @Slot()
     def set_ndi_source(self, source_id):
         self.th.set_ndi_source(self.sources[source_id])
