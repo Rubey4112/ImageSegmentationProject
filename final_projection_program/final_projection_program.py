@@ -251,8 +251,11 @@ class Window(QMainWindow):
         buttons_layout.addWidget(self.button1)
 
         # Checkbox
-        self.checkbox = QCheckBox("Enable preview", self)
-        buttons_layout.addWidget(self.checkbox)
+        self.checkbox1 = QCheckBox("Enable cam preview", self)
+        buttons_layout.addWidget(self.checkbox1)
+        self.checkbox2 = QCheckBox("Enable preview", self)
+        self.checkbox2.setChecked(True)
+        buttons_layout.addWidget(self.checkbox2)
 
 
         # Buttons group
@@ -275,7 +278,8 @@ class Window(QMainWindow):
         
         
         # Connections
-        self.checkbox.clicked.connect(self.cam_checkbox_clicked)
+        self.checkbox1.clicked.connect(self.cam_checkbox_clicked)
+        self.checkbox2.clicked.connect(self.preview_checkbox_clicked)
         self.button1.clicked.connect(self.start)
         self.button2.clicked.connect(self.kill_thread)
         self.button2.setEnabled(False)
@@ -288,6 +292,13 @@ class Window(QMainWindow):
             self.th.enable_cam_preview()
         else:
             self.th.disable_cam_preview()
+    
+    @Slot()
+    def preview_checkbox_clicked(self, checked):
+        if checked:
+            self.th.enable_preview()
+        else:
+            self.th.disable_preview()
     
     @Slot()
     def set_ndi_source(self, source_id):
