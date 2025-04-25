@@ -33,13 +33,10 @@ class Thread(QThread):
         self.status = True
         self.cap = True
         self.camera_preview = False
-        self.preview = True
         self.model = YOLO("yolo11m-seg.pt")
 
-        #### Resolution Settings ####
-        """must be multiple of 32 for YOLOv11"""
-        self.res_x = 1280
-        self.res_y = 736
+        self.res_x = 640
+        self.res_y = 480
         
         ####### End of Class Field ########
         
@@ -90,10 +87,6 @@ class Thread(QThread):
     def run(self):
         self.status = True # thread state
         self.cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
-
-        self.cap.set(cv2.CAP_PROP_FPS, 30.0)
-        self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter.fourcc('m','j','p','g'))
-        self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter.fourcc('M','J','P','G'))
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.res_x)
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.res_y)
 
@@ -111,7 +104,7 @@ class Thread(QThread):
                 ndi.recv_free_video_v2(self.ndi_recv, v)
             if success:
                 # start = time.perf_counter()
-                results = self.model.predict(frame, verbose = False, imgsz=(self.res_y, self.res_x))
+                results = self.model.predict(frame, verbose = False)
                 # for result in results:
                 result = results[0]
 
@@ -149,7 +142,7 @@ class Thread(QThread):
                 ndi.send_send_video_v2(self.ndi_send, self.video_frame)          
             
             # Reading the image in RGB to display it
-            if self.preview:
+            if self.enable_preview:
                 color_frame = cv2.cvtColor(isolated, cv2.COLOR_BGR2RGB)
 
                 h, w, ch = color_frame.shape
@@ -162,18 +155,10 @@ class Thread(QThread):
 
     @Slot()
     def enable_preview(self):
-        self.preview = True
-
-    @Slot()
-    def disable_preview(self):
-        self.preview = False
-
-    @Slot()
-    def enable_cam_preview(self):
         self.camera_preview = True
 
     @Slot()
-    def disable_cam_preview(self):
+    def disable_preview(self):
         self.camera_preview = False
     
     @Slot()
@@ -203,10 +188,9 @@ class Window(QMainWindow):
         
         # self.menu_setting =
 
-        # Create a label for the display self.cap
+        # Create a label for the display camera
         self.label = QLabel(self)
-        # width, height
-        self.label.setFixedSize(1280, 736)
+        self.label.setFixedSize(640, 480)
 
         # Thread in charge of updating the image
         self.th = Thread(self)
@@ -275,7 +259,7 @@ class Window(QMainWindow):
         
         
         # Connections
-        self.checkbox.clicked.connect(self.cam_checkbox_clicked)
+        self.checkbox.clicked.connect(self.checkbox_clicked)
         self.button1.clicked.connect(self.start)
         self.button2.clicked.connect(self.kill_thread)
         self.button2.setEnabled(False)
@@ -283,11 +267,11 @@ class Window(QMainWindow):
         self.combobox.currentIndexChanged.connect(self.set_ndi_source)
 
     @Slot()
-    def cam_checkbox_clicked(self, checked):
+    def checkbox_clicked(self, checked):
         if checked:
-            self.th.enable_cam_preview()
+            self.th.enable_preview()
         else:
-            self.th.disable_cam_preview()
+            self.th.disable_preview()
     
     @Slot()
     def set_ndi_source(self, source_id):
