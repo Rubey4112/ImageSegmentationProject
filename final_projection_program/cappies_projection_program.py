@@ -33,10 +33,13 @@ class Thread(QThread):
         self.status = True
         self.cap = True
         self.camera_preview = False
+        self.preview = True
         self.model = YOLO("yolo11m-seg.pt")
 
-        self.res_x = 640
-        self.res_y = 480
+        #### Resolution Settings ####
+        """must be multiple of 32 for YOLOv11"""
+        self.res_x = 1280
+        self.res_y = 736
         
         ####### End of Class Field ########
         
@@ -82,16 +85,29 @@ class Thread(QThread):
     @Slot()
     def stop(self):
         self.status = False
-        
+    
+    # define a function for vertically  
+    # concatenating images of the  
+    # same size  and horizontally 
+    @Slot()
+    def concat_vh(self, list_2d): 
+        # return final image 
+        return cv2.vconcat([cv2.hconcat(list_h)  
+                            for list_h in list_2d]) 
+    
     @Slot()
     def run(self):
         self.status = True # thread state
         self.cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+
+        self.cap.set(cv2.CAP_PROP_FPS, 30.0)
+        self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter.fourcc('m','j','p','g'))
+        self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter.fourcc('M','J','P','G'))
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.res_x)
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.res_y)
 
         isolated = self.blank_frame
-
+        mask = self.blank_frame
         counter = 0
         while self.status:
             success, frame = self.cap.read()
@@ -104,61 +120,67 @@ class Thread(QThread):
                 ndi.recv_free_video_v2(self.ndi_recv, v)
             if success:
                 # start = time.perf_counter()
-                results = self.model.predict(frame, verbose = False)
+                results = self.model.predict(frame, verbose = False, imgsz=(self.res_y, self.res_x))
                 # for result in results:
                 result = results[0]
 
                 if len(self.ndi_recv_buffer):
                     self.nframe = self.ndi_recv_buffer.pop() 
+                if result.masks is not None:
+                    # get array results
+                    masks = result.masks.data
+                    boxes = result.boxes.data
+                    # extract classes
+                    clss = boxes[:, 5]
+                    # get indices of results where class is 0 (people in COCO)
+                    people_indices = torch.where(clss == 0)
+                    # use these indices to extract the relevant masks
+                    people_masks = masks[people_indices]
+                    # scale for visualizing results
+                    people_mask = torch.any(people_masks, dim=0).int() * 255
+                    
+                    mask = cv2.cvtColor(people_mask.cpu().numpy().astype(np.uint8), cv2.COLOR_GRAY2BGR)
+                    
+                    if mask.size:
+                        isolated = cv2.bitwise_and(mask, self.nframe)
+                elif counter>3: 
+                    counter = 0
+                    isolated = self.blank_frame
+                else: counter += 1
 
-                if not self.camera_preview:
-                    if result.masks is not None:
-                        # get array results
-                        masks = result.masks.data
-                        boxes = result.boxes.data
-                        # extract classes
-                        clss = boxes[:, 5]
-                        # get indices of results where class is 0 (people in COCO)
-                        people_indices = torch.where(clss == 0)
-                        # use these indices to extract the relevant masks
-                        people_masks = masks[people_indices]
-                        # scale for visualizing results
-                        people_mask = torch.any(people_masks, dim=0).int() * 255
-                        
-                        mask = cv2.cvtColor(people_mask.cpu().numpy().astype(np.uint8), cv2.COLOR_GRAY2BGR)
-                        
-                        if mask.size:
-                            isolated = cv2.bitwise_and(mask, self.nframe)
-                    elif counter>3: 
-                        counter = 0
-                        isolated = self.blank_frame
-                    else: counter += 1
-                else:
-                    isolated = frame
                 img = cv2.cvtColor(isolated, cv2.COLOR_BGR2BGRA)
                 self.video_frame.data = img
                 self.video_frame.FourCC = ndi.FOURCC_VIDEO_TYPE_BGRX
 
-                ndi.send_send_video_v2(self.ndi_send, self.video_frame)          
-            
+                ndi.send_send_video_v2(self.ndi_send, self.video_frame)  
+            frame2 = cv2.resize(frame, (self.res_x, self.res_y))[:,:,:3]
+            img_tile = self.concat_vh([[isolated, mask], [frame2, self.nframe]])
             # Reading the image in RGB to display it
-            if self.enable_preview:
-                color_frame = cv2.cvtColor(isolated, cv2.COLOR_BGR2RGB)
 
-                h, w, ch = color_frame.shape
-                img = QImage(color_frame.data, w, h, ch * w, QImage.Format_RGB888)
-                scaled_img = img.scaled(self.res_x, self.res_y, Qt.KeepAspectRatio)
+            color_frame = cv2.cvtColor(img_tile, cv2.COLOR_BGR2RGB)
 
-                # Emit signal
-                self.updateFrame.emit(scaled_img)
+            h, w, ch = color_frame.shape
+            img = QImage(color_frame.data, w, h, ch * w, QImage.Format_RGB888)
+            scaled_img = img.scaled(self.res_x, self.res_y, Qt.KeepAspectRatio)
+
+            # Emit signal
+            self.updateFrame.emit(scaled_img)
         # sys .exit(-1)
 
     @Slot()
     def enable_preview(self):
-        self.camera_preview = True
+        self.preview = True
 
     @Slot()
     def disable_preview(self):
+        self.preview = False
+
+    @Slot()
+    def enable_cam_preview(self):
+        self.camera_preview = True
+
+    @Slot()
+    def disable_cam_preview(self):
         self.camera_preview = False
     
     @Slot()
@@ -188,9 +210,10 @@ class Window(QMainWindow):
         
         # self.menu_setting =
 
-        # Create a label for the display camera
+        # Create a label for the display self.cap
         self.label = QLabel(self)
-        self.label.setFixedSize(640, 480)
+        # width, height
+        self.label.setFixedSize(1280, 736)
 
         # Thread in charge of updating the image
         self.th = Thread(self)
@@ -235,8 +258,11 @@ class Window(QMainWindow):
         buttons_layout.addWidget(self.button1)
 
         # Checkbox
-        self.checkbox = QCheckBox("Enable preview", self)
-        buttons_layout.addWidget(self.checkbox)
+        """ self.checkbox1 = QCheckBox("Enable cam preview", self)
+        buttons_layout.addWidget(self.checkbox1)
+        self.checkbox2 = QCheckBox("Enable preview", self)
+        self.checkbox2.setChecked(True)
+        buttons_layout.addWidget(self.checkbox2) """
 
 
         # Buttons group
@@ -259,7 +285,8 @@ class Window(QMainWindow):
         
         
         # Connections
-        self.checkbox.clicked.connect(self.checkbox_clicked)
+        """ self.checkbox1.clicked.connect(self.cam_checkbox_clicked)
+        self.checkbox2.clicked.connect(self.preview_checkbox_clicked) """
         self.button1.clicked.connect(self.start)
         self.button2.clicked.connect(self.kill_thread)
         self.button2.setEnabled(False)
@@ -267,7 +294,14 @@ class Window(QMainWindow):
         self.combobox.currentIndexChanged.connect(self.set_ndi_source)
 
     @Slot()
-    def checkbox_clicked(self, checked):
+    def cam_checkbox_clicked(self, checked):
+        if checked:
+            self.th.enable_cam_preview()
+        else:
+            self.th.disable_cam_preview()
+    
+    @Slot()
+    def preview_checkbox_clicked(self, checked):
         if checked:
             self.th.enable_preview()
         else:

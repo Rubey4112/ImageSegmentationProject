@@ -34,9 +34,9 @@ setuptools==70.0.0
 shiboken6==6.8.1.1
 six==1.17.0
 sympy==1.13.1
-torch>=2.5.1+cu124
-torchaudio>=2.5.1+cu124
-torchvision>=0.20.1+cu124
+torch>=2.5.1
+torchaudio>=2.5.1
+torchvision>=0.20.1
 tqdm==4.67.1
 typing_extensions==4.9.0
 tzdata==2024.2
